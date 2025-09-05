@@ -1,7 +1,10 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
 
 The goal of the following simulation is to develop our understanding of the two-way fixed effect model. See the original paper by [Abowd Kramartz and Margolis](http://onlinelibrary.wiley.com/doi/10.1111/1468-0262.00020/full).
-
-
 
 # Constructing Employer-Employee matched data
 
@@ -11,8 +14,7 @@ One central piece is to have a network of workers and firms over time. We then s
 
 We are going to model the mobility between workers and firms. Given a transition matrix we can solve for a stationary distribution, and then construct our panel from there.
 
-
-```r
+```{r}
 nk = 30
 nl = 10
 
@@ -59,23 +61,18 @@ for (l in 1:nl) {
 Plot1=wireframe(G[1,,],aspect = c(1,1),xlab = "previous firm",ylab="next firm")
 Plot2=wireframe(G[nl,,],aspect = c(1,1),xlab = "previous firm",ylab="next firm")
 grid.arrange(Plot1, Plot2,nrow=1)
-```
 
-![](index_files/figure-html/unnamed-chunk-2-1.png)<!-- -->
+```
 
 And we can plot the joint distribution of matches
 
-
-```r
+```{r}
 wireframe(H,aspect = c(1,1),xlab = "worker",ylab="firm")
 ```
 
-![](index_files/figure-html/unnamed-chunk-3-1.png)<!-- -->
+The next step is to simulate our network given our transitions rules.
 
-The next step is to simulate our network given our transitions rules. 
-
-
-```r
+```{r}
 nt = 5
 ni = 100000
 
@@ -101,8 +98,8 @@ for (i in 1:ni) {
   }
 }
 
-data  = data.table(melt(network,c('i','t'))) 
-data2 = data.table(melt(spellcount,c('i','t')))
+data  = data.table(reshape2::melt(network,c('i','t'))) 
+data2 = data.table(reshape2::melt(spellcount,c('i','t')))
 setnames(data,"value","k") # firm type
 data <- data[,spell := data2$value] # number of spells
 data <- data[,l := A[i],i] # worker type
@@ -110,12 +107,10 @@ data <- data[,alpha := alpha[l],l] # worker FE
 data <- data[,psi := psi[k],k] # firm FE
 ```
 
-
 The final step is assigning identities to firms. We are going to do this by randomly assigning firm ids to spells.
 
-
-```r
-firm_size = 10
+```{r}
+firm_size = 20
 within_firm_count = ni/(firm_size*nk*nt)
 
 dspell <- data[,list(len=.N),list(i,spell,k)] #length of the spell in each firm by worker
@@ -127,12 +122,10 @@ setkey(dspell,i,spell)
 
 data <- data[, fid:= dspell[data,fid]]
 ```
-<span class="label label-success">Task 1</span> Compute:
- - mean firm size, in the crossection, expect something like 15.
- - mean number of movers per firm in total in our panel (a worker that moved from firm i to j is counted as mover in firm i as well as in firm j).
 
+Compute: - mean firm size, in the crossection, expect something like 10. - mean number of movers per firm in total in our panel (a worker that moved from firm i to j is counted as mover in firm i as well as in firm j).
 
-```r
+```{r}
 #firm size
 firm_size_t = data[,.N,list(fid,t)]
 setkey(firm_size_t,fid)
@@ -155,34 +148,27 @@ data <- data[, movers_size:= firm_mover[fid,V1]]
 hist(data[t==1]$firm_size) # at any t, the firm size distribution is the same
 ```
 
-![](index_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
-
-```r
+```{r}
 hist(data$movers_size)
 ```
-
-![](index_files/figure-html/unnamed-chunk-6-2.png)<!-- -->
-
 
 ## Simulating AKM wages
 
 We start with just AKM wages, which is log additive with some noise.
 
-
-```r
+```{r}
 w_sigma = 0.8
 data <- data[, lw := alpha + psi + w_sigma * rnorm(.N) ]
 ```
 
-<span class="label label-success">Task 2</span> We use this generated data to create the event study plot from Card-Heining-Kline:
+We use this generated data to create the event study plot from Card-Heining-Kline:
 
- 1. Compute the mean wage within firm
- 2. group firms into quartiles
- 3. select workers around a move (2 periods pre, 2 periods post)
- 4. compute wages before/after the mover for each transitions (from each quartile to each quartile)
+1.  Compute the mean wage within firm
+2.  group firms into quartiles
+3.  select workers around a move (2 periods pre, 2 periods post)
+4.  compute wages before/after the mover for each transitions (from each quartile to each quartile)
 
-
-```r
+```{r}
 data[,mean_w:=mean(lw),fid]
 q1 = quantile(data$mean_w,.25)
 q2 = quantile(data$mean_w,.5)
@@ -226,7 +212,6 @@ data_ckh[, flag_end:=max(flag_end),i]
 data_ckh <- data_ckh[,mean(lw),list(t,flag_ini,flag_end)]
 ```
 
-
 # Estimating AKM
 
 This requires to first extract a large connected set, and then to estimate the linear problem with many dummies.
@@ -235,9 +220,7 @@ This requires to first extract a large connected set, and then to estimate the l
 
 Because we are not going to deal with extremely large data-sets, we can use off the shelf algorithms to extract the connected set. Use the function `conComp` from the package `ggm` to extract the connected set from our data. To do so you will need to construct first an adgency matrix between the firms. Here is how I would proceed to construct the adjency matrix:
 
-
-
-```r
+```{r}
 setkey(data,i,t)
 
 adjMat <- function(data){ 
@@ -270,38 +253,25 @@ aa = unique(data$fid)
 Nfirm_con = length(aa)
 
 print("proportion of firms in the connected set is")
-```
-
-```
-## [1] "proportion of firms in the connected set is"
-```
-
-```r
 print(Nfirm_con/Nfirm)
 ```
 
-```
-## [1] 0.9637456
-```
-
-
 ## Estimating worker and firms FE
 
-Finally, we are going to implement the AKM estimator. This can be done simply by updating in turn the worker FE and the firms FE. 
+Finally, we are going to implement the AKM estimator. This can be done simply by updating in turn the worker FE and the firms FE.
 
 Start by appending 2 new columns `alpha_hat` and `psi_hat` to your data. Then loop over the following:
 
- 1. update `alpha_hat` by just taking the mean within `i` net of firm FE, use data.table to do that very efficiently
- 2. update `psi_hat`   by just taking the mean within `fid` net of worker FE, use data.table to do that very efficiently
- 
- 
+1.  update `alpha_hat` by just taking the mean within `i` net of firm FE, use data.table to do that very efficiently
+2.  update `psi_hat` by just taking the mean within `fid` net of worker FE, use data.table to do that very efficiently
+
 Estimating this model is non-trivial. We are going to take the approach of [Guimareas and Portugal](https://s3.amazonaws.com/academia.edu.documents/42461471/Variable_selection_in_linear_regression20160209-26324-14r87y1.pdf?AWSAccessKeyId=AKIAIWOWYYGZ2Y53UL3A&Expires=1525336798&Signature=I2SdtwWgl0U6e28114dmaiLjlA4%3D&response-content-disposition=inline%3B%20filename%3DVariable_selection_in_linear_regression.pdf#page=130), who propose a *ZigZag* estimator in the Stata Journal. [Simen Gaure](https://www.sciencedirect.com/science/article/pii/S0167947313001266) proposes an almost equivalent approach and develops the [`lfe`](https://cran.r-project.org/web/packages/lfe/lfe.pdf) package for R. The idea in both approaches starts with the formulation
 
 $$
 \mathbf{Y} = \mathbf{Z}\beta + \mathbf{D}\alpha + \epsilon
 $$
 
-where $\mathbf{Z}$ is $(N,k)$, and $\mathbf{D}$ is a  $(N,G_1)$ matrix of dummy variables: element $(i,j)$ of $\mathbf{D}$ is $1$ if $i$ is associated to $j$.
+where $\mathbf{Z}$ is $(N,k)$, and $\mathbf{D}$ is a $(N,G_1)$ matrix of dummy variables: element $(i,j)$ of $\mathbf{D}$ is $1$ if $i$ is associated to $j$.
 
 Both papers show the recursive relationship
 
@@ -313,15 +283,15 @@ $$
 \right]
 $$
 
-* line 2 is just `data[,mean(resid(lm(y ~ z))),by=i]`
-* Dimensionality of $\mathbf{D}$ becomes irrelevant.
-* Same principle for more than 1 FE:
+-   line 2 is just `data[,mean(resid(lm(y ~ z))),by=i]`
+-   Dimensionality of $\mathbf{D}$ becomes irrelevant.
+-   Same principle for more than 1 FE:
 
 $$
 \mathbf{Y} = \mathbf{Z}\beta + \mathbf{D}_1\alpha + \mathbf{D}_2\gamma + \epsilon
 $$
 
-and recursive structure: 
+and recursive structure:
 
 $$
 \left[ \begin{array}{c}
@@ -332,16 +302,13 @@ $$
 \right]
 $$
 
-* First, store a `mod = data[,lm(y ~ z + D1 + D2)]`
-* line 2 is just `data[,mean(resid(mod) + coef(mod)[3]*D2),by=i]`
-* line 3 is just `data[,mean(resid(mod) + coef(mod)[2]*D1),by=j]`
+-   First, store a `mod = data[,lm(y ~ z + D1 + D2)]`
+-   line 2 is just `data[,mean(resid(mod) + coef(mod)[2]*D1),by=i]`
+-   line 3 is just `data[,mean(resid(mod) + coef(mod)[3]*D2),by=j]`
 
 Guimaraes+Portugal do this in an iterative fashion until the difference in mean squared error (MSE) of successive estimates of line 0 becomes small.
 
- 
-
-
-```r
+```{r}
 guimaraesPortugal <- function(data,tol=1e-6){
   setkey(data,i,t)
   data[,fid.l1 := data[J(i,t-1)][["fid"]]]
@@ -366,7 +333,7 @@ guimaraesPortugal <- function(data,tol=1e-6){
     data[,alpha_hat := mean(res + coefs[3]*alpha_hat),by=i ]
     data[,psi_hat := mean(res + coefs[2]*psi_hat),by=fid ]
     if (i==1 || (i %% 10 == 0)){
-     # flog.info("iter=%d, MSE=%f, delta(MSE)=%f",i,MSE0,delta)  
+     flog.info("iter=%d, MSE=%f, delta(MSE)=%f",i,MSE0,delta)  
     }
   }
   return(data)
@@ -377,49 +344,62 @@ dd=guimaraesPortugal(data)
 summary(lm(lw~alpha_hat+psi_hat,data))
 ```
 
-```
-## 
-## Call:
-## lm(formula = lw ~ alpha_hat + psi_hat, data = data)
-## 
-## Residuals:
-##     Min      1Q  Median      3Q     Max 
-## -3.2183 -0.4546  0.0001  0.4552  3.2072 
-## 
-## Coefficients:
-##              Estimate Std. Error  t value Pr(>|t|)    
-## (Intercept) 0.0061970  0.0010926    5.672 1.42e-08 ***
-## alpha_hat   1.0000516  0.0009803 1020.179  < 2e-16 ***
-## psi_hat     1.0001096  0.0012066  828.862  < 2e-16 ***
-## ---
-## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-## 
-## Residual standard error: 0.6815 on 388974 degrees of freedom
-## Multiple R-squared:  0.7897,	Adjusted R-squared:  0.7897 
-## F-statistic: 7.305e+05 on 2 and 388974 DF,  p-value: < 2.2e-16
-```
-
 ## Computing the variance decomposition
 
-We now compute the variance decomposition and compare it with its infeasible counterpart, using alpha and psi, instead of $\hat{\alpha}$ and $\hat{\psi}$.
+We now compute the variance decomposition and compare it with its unfeasible counterpart, using alpha and psi, instead of $\hat{\alpha}$ and $\hat{\psi}$.
 
 The variance decomposition is: $(var(\hat{\alpha}),var(\hat{\psi}),cov(\hat{\alpha},\hat{\psi}))$:
 
-```r
+```{r}
 c(var(data$alpha_hat),var(data$psi_hat),cov(data$alpha_hat,data$psi_hat))
 ```
 
-```
-## [1]  1.2881528  0.8502136 -0.1972321
-```
-
-
 The true variance decomposition is: $(var(\alpha),var(\psi),cov(\alpha,\psi))$
 
-```r
+```{r}
 c(var(data$alpha),var(data$psi),cov(data$alpha,data$psi))
 ```
 
+```{r}
+
+## Regularization with k-means: 
+Kgroup = 6
+rr <- data[,.(mean_lw =mean(lw),stdev_lw = sqrt(var(lw))),by=fid]
+Nschools = rr[,.N]
+data_matrix <- matrix(c(rr$mean_lw,rr$stdev_lw),nrow=Nfirm_con,ncol=2,byrow=FALSE)
+kmeans_result <- kmeans(data_matrix, centers = Kgroup, nstart=100)
+rr[,cl_f:=kmeans_result$cluster]
+data_final2 <-merge(data, rr, by = "fid", all.x = TRUE)
+#data <- data_final2
+data_final2[,k:=cl_f]
+nk = Kgroup
+
+data_final2[,mean_fid:=mean(lw),by=fid]
+data_final2[,mean_cl:=mean(lw),by=k]
+
+var_exp = var(data_final2$mean_cl)/var(data_final2$mean_fid)
+print("variance explained by clusters")
+print(var_exp)
+
+data_final2[,mean_fid:=NULL]
+data_final2[,mean_cl:=NULL]
+
 ```
-## [1] 0.6202044 0.3470182 0.2961474
+
+## Regularization by clusters
+
+We now use k-means to define clusters of firms that approximate the firm-specific unobserved heterogeneity.
+
+```{r}
+# We now compute the variance decomposition based on this cluster-level firm effects:
+
+
+data_final2[, fid:=k]
+dd=guimaraesPortugal(data_final2)
+```
+
+The variance decomposition based on clusters is: $(var(\hat{\alpha}),var(\hat{\psi}(\hat{k}_i)),cov(\hat{\alpha},\hat{\psi}(\hat{k}_i)))$:
+
+```{r}
+c(var(data_final2$alpha_hat),var(data_final2$psi_hat),cov(data_final2$alpha_hat,data_final2$psi_hat))
 ```
